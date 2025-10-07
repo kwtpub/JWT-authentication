@@ -6,11 +6,13 @@ const mongoose = require('mongoose');
 const PORT = process.env.PORT || 3001;
 const app = express();
 const router = require('./router/index');
+const errorMiddleware = require('./exceptions/error-middleware');
 
 app.use(express.json())
 app.use(cookieParser());
 app.use(cors());
 app.use('/api', router);
+app.use(errorMiddleware);
 
 // Middleware для обработки ошибок
 app.use((err, req, res, next) => {
