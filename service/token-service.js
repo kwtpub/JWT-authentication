@@ -8,7 +8,7 @@ class TokenService {
         if (!accessSecret || !refreshSecret) {
             throw new Error('JWT secrets are not configured. Set JWT_ACCESS_SECRET and JWT_REFRESH_SECRET in environment.');
         }
-        const accessToken = jwt.sign(payload, accessSecret, {expiresIn: '30m'})
+        const accessToken = jwt.sign(payload, accessSecret, {expiresIn: '30s'})
         const refreshToken = jwt.sign(payload, refreshSecret, {expiresIn: '30d'})
         return {
             accessToken,
