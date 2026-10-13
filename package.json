@@ -1,11 +1,17 @@
 {
-  "name": "server",
+  "name": "jwt-authentication-appsec-case",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "JWT authentication security review, remediation, and regression tests",
+  "main": "server.js",
+  "private": true,
+  "engines": { "node": ">=22" },
   "scripts": {
-    "dev": "nodemon server.js",
-    "start": "node server.js"
+    "dev": "node --watch server.js",
+    "start": "node server.js",
+    "migrate:sessions": "node scripts/migrate-sessions.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
+    "test:coverage": "node --experimental-test-coverage --test --test-concurrency=1 tests/*.test.js",
+    "reproduce:baseline": "node scripts/reproduce-baseline.cjs"
   },
   "keywords": [],
   "author": "",
@@ -19,12 +25,13 @@
     "express": "^5.1.0",
     "express-validator": "^7.2.1",
     "jsonwebtoken": "^9.0.2",
-    "mongodb": "^6.20.0",
     "mongoose": "^8.18.2",
-    "nodemailer": "^7.0.6",
-    "uuid": "^13.0.0"
+    "nodemailer": "^10.1.7",
+    "helmet": "^8.3.0",
+    "express-rate-limit": "^8.7.1"
   },
   "devDependencies": {
-    "nodemon": "^3.1.10"
+    "mongodb-memory-server": "^11.3.0",
+    "supertest": "^7.3.1"
   }
 }

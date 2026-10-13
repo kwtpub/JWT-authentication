@@ -1,0 +1,21 @@
+{
+  "verifiedOn": "2026-10-20",
+  "nodeVersion": "v22.21.1",
+  "npmVersion": "10.9.4",
+  "mongoVersion": "8.2.6",
+  "testCommand": "npm test",
+  "tests": { "total": 36, "passed": 36, "failed": 0, "skipped": 0 },
+  "baselineCommand": "npm run reproduce:baseline",
+  "baselineReproductionPassed": true,
+  "dependencyAudit": {
+    "command": "npm audit --json",
+    "before": { "total": 17, "critical": 1, "high": 12, "moderate": 4 },
+    "after": { "total": 0, "critical": 0, "high": 0, "moderate": 0 }
+  },
+  "scope": "Local HTTP and disposable MongoDB; synthetic accounts; mail service/transport captured; no deployed database or real SMTP account used",
+  "limitations": [
+    "Point-in-time dependency audit, not proof that no vulnerabilities exist",
+    "No production penetration test, browser end-to-end test, or SMTP deliverability test",
+    "No deployed migration or key rotation performed"
+  ]
+}

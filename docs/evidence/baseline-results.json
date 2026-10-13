@@ -1,0 +1,34 @@
+{
+  "baselineCommit": "aaa13945d4c7dfd03e4510fdc109b92720fc52ec",
+  "verifiedOn": "2026-10-20",
+  "environment": "Local Express + temporary MongoDB; synthetic accounts only",
+  "threeCharacterPasswordAccepted": true,
+  "effectiveBcryptCost": 4,
+  "unverifiedRegistrationIssuesAccessToken": true,
+  "refreshTokenExposedInJson": true,
+  "authenticatedUsersEndpointStatus": 200,
+  "passwordHashExposedInUsersResponse": true,
+  "activationTokenExposedInUsersResponse": true,
+  "sameSecondRefreshTokensAreIdentical": true,
+  "parallelRefreshStatuses": [
+    200,
+    200
+  ],
+  "refreshTokenStoredInPlaintext": true,
+  "cookieFlags": {
+    "httpOnly": true,
+    "secure": false,
+    "sameSite": false
+  },
+  "credentialErrors": [
+    {
+      "status": 400,
+      "message": "Пользователь с такой почтой не найден"
+    },
+    {
+      "status": 400,
+      "message": "Неверный пароль"
+    }
+  ],
+  "committedCookieJarContainsJwt": true
+}

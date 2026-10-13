@@ -1,86 +1,104 @@
-const UserModel = require('../models/user-model');
-
+const User = require('../models/user-model');
 const bcrypt = require('bcrypt');
-const uuid = require('uuid');
+const { randomBytes } = require('node:crypto');
 const mailService = require('./mail-service');
 const tokenService = require('./token-service');
 const ApiError = require('../exceptions/api-error');
 const UserDto = require('../dtos/user-dto');
+const config = require('../config');
 
+// Same bcrypt work for unknown users; don't create a fresh dummy hash per request.
+const dummyHash = bcrypt.hashSync(randomBytes(32).toString('hex'), config.bcryptCost);
+const registrationMessage = { message: 'If registration is available, an activation email will be sent' };
 
 class UserService {
     async registration(email, password) {
-        const candidate = await UserModel.findOne({email});
-        if (candidate) {
-            throw ApiError.BadRequest(`Пользователь с почтой ${email} уже существует`);
-        }
-        const hashPassword = await bcrypt.hash(password, 3);
-        const activationLink = uuid.v4();
-        const user = await UserModel.create({email, password: hashPassword, activationLink});
-        
-        // Отправляем email без ожидания, чтобы избежать таймаута
+        if (await User.exists({ email })) return registrationMessage;
+        const passwordHash = await bcrypt.hash(password, config.bcryptCost);
+        const activationToken = randomBytes(32).toString('hex');
+        let user;
         try {
-            await mailService.sendActivationMail(email, `${process.env.API_URL}/api/activate/${activationLink}`);
-        } catch (emailError) {
-            console.warn('Ошибка отправки email активации:', emailError.message);
-            // Продолжаем работу даже если email не отправился
+            user = await User.create({
+                email, password: passwordHash,
+                activationTokenHash: tokenService.hash(activationToken),
+                activationExpiresAt: new Date(Date.now() + config.activationTtl),
+            });
+        } catch (error) {
+            if (error.code === 11000) return registrationMessage;
+            throw error;
         }
-
-        const userDto = new UserDto(user);
-        const tokens = tokenService.generateTokens({...userDto});
-        await tokenService.saveToken(userDto.id, tokens.refreshToken);
-
-        return {...tokens, user: userDto}
-
-    }
-    async activate(activationLink) {
-        const user = await UserModel.findOne({activationLink});
-        if (!user) {
-            throw new Error('Пользователь не найден');
+        try {
+            await mailService.sendActivationMail(email, config.apiOrigin + '/api/activate/' + activationToken);
+        } catch {
+            // A failed delivery must not strand a new pending account permanently.
+            await User.deleteOne({ _id: user._id, isActivated: false });
+            throw ApiError.ServiceUnavailable();
         }
-        user.isActivated = true;
-        await user.save();
+        return registrationMessage;
     }
+
+    async activate(token) {
+        const user = await User.findOneAndUpdate({
+            activationTokenHash: tokenService.hash(token),
+            activationExpiresAt: { $gt: new Date() }, isActivated: false,
+        }, {
+            $set: { isActivated: true },
+            $unset: { activationTokenHash: '', activationExpiresAt: '', activationLink: '' },
+        }, { new: true, strict: false });
+        if (!user) throw ApiError.BadRequest('Invalid or expired activation link');
+    }
+
+    async resendActivation(email) {
+        const token = randomBytes(32).toString('hex');
+        const now = Date.now();
+        // A per-account cooldown also covers migrated pending accounts with no token.
+        const user = await User.findOneAndUpdate({
+            email, isActivated: false,
+            $or: [
+                { activationExpiresAt: { $lte: new Date(now + config.activationTtl - 60000) } },
+                { activationExpiresAt: { $exists: false } },
+            ],
+        }, { $set: {
+            activationTokenHash: tokenService.hash(token),
+            activationExpiresAt: new Date(now + config.activationTtl),
+        } }, { new: true });
+        if (user) {
+            try { await mailService.sendActivationMail(user.email, config.apiOrigin + '/api/activate/' + token); }
+            catch { throw ApiError.ServiceUnavailable(); }
+        }
+        return registrationMessage;
+    }
+
     async login(email, password) {
-        const user = await UserModel.findOne({email});
-        if (!user) {
-            throw ApiError.BadRequest('Пользователь с такой почтой не найден');
+        const user = await User.findOne({ email }).select('+password');
+        const matches = await bcrypt.compare(password, user ? user.password : dummyHash);
+        if (!user || !matches || !user.isActivated) throw ApiError.InvalidCredentials();
+        if (bcrypt.getRounds(user.password) < config.bcryptCost) {
+            user.password = await bcrypt.hash(password, config.bcryptCost);
+            await user.save();
         }
-        const isPasswordCorrect = await bcrypt.compare(password, user.password);
-        if (!isPasswordCorrect) {
-            throw ApiError.BadRequest('Неверный пароль');
-        }
-        const userDto = new UserDto(user);
-        const tokens = tokenService.generateTokens({...userDto});
-
-        await tokenService.saveToken(userDto.id, tokens.refreshToken);
-        return {...tokens, user: userDto}
+        return { ...await tokenService.createSession(user._id), user: new UserDto(user) };
     }
-    
+
     async logout(refreshToken) {
-        const token = await tokenService.removeToken(refreshToken);
-        return token;
+        await tokenService.revoke(refreshToken);
     }
 
     async refresh(refreshToken) {
-      if(!refreshToken) {
-        throw ApiError.UnauthorizedError();
-      }
-      const userData = tokenService.validateRefreshToken(refreshToken);
-      const tokenFromDb = await tokenService.findToken(refreshToken);
-      if(!userData || !tokenFromDb) {
-        throw ApiError.UnauthorizedError();
-      }
-      const user = await UserModel.findById(userData.id);
-      const userDto = new UserDto(user);
-      const tokens = tokenService.generateTokens({...userDto});
-      await tokenService.saveToken(userDto.id, tokens.refreshToken);
-      return {...tokens, user: userDto}
-  }
-  async getAllUsers() {
-    const users = await UserModel.find();
-    return users;
-  }
+        const claims = tokenService.validateRefreshToken(refreshToken);
+        if (!claims) throw ApiError.UnauthorizedError();
+        const user = await User.findById(claims.sub);
+        if (!user || !user.isActivated) throw ApiError.UnauthorizedError();
+        const tokens = await tokenService.rotate(refreshToken, claims);
+        if (!tokens) throw ApiError.UnauthorizedError();
+        return { ...tokens, user: new UserDto(user) };
+    }
+
+    async getMe(userId) {
+        const user = await User.findById(userId);
+        if (!user || !user.isActivated) throw ApiError.UnauthorizedError();
+        return new UserDto(user);
+    }
 }
 
 module.exports = new UserService();

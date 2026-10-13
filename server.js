@@ -1,37 +1,23 @@
-require('dotenv').config();
-const express = require('express');
-const cors = require('cors');
-const cookieParser = require('cookie-parser');
+require('dotenv').config({ quiet: true });
 const mongoose = require('mongoose');
-const PORT = process.env.PORT || 3001;
-const app = express();
-const router = require('./router/index');
-const errorMiddleware = require('./exceptions/error-middleware');
+const config = require('./config');
+const { createApp } = require('./app');
+const User = require('./models/user-model');
+const Token = require('./models/token-model');
 
-app.use(express.json())
-app.use(cookieParser());
-app.use(cors({
-  credentials: true,
-  origin: process.env.CLIENT_URL
-}));
-app.use('/api', router);
-app.use(errorMiddleware);
-
-// Middleware для обработки ошибок
-app.use((err, req, res, next) => {
-    console.error('Ошибка сервера:', err.message);
-    return res.status(500).json({
-        message: err.message || 'Внутренняя ошибка сервера',
-        ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
-    });
-});
-const start = async () => {
-    try {
-        await mongoose.connect(process.env.DB_URL);
-        app.listen(PORT, () => console.log(`Server start on Port: ${PORT}`))
-    } catch (e) {
-        console.log(e);
-    }
+async function start() {
+    await mongoose.connect(config.dbUrl);
+    await Promise.all([User.init(), Token.init()]);
+    return createApp().listen(config.port, () => console.log('API listening on port ' + config.port));
 }
 
-start();
+if (require.main === module) {
+    start().catch(async () => {
+        // Connection errors may contain credentials; never print the raw error.
+        console.error('API startup failed; check configuration and database connectivity');
+        await mongoose.disconnect();
+        process.exitCode = 1;
+    });
+}
+
+module.exports = { start };

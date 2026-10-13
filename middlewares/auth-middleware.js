@@ -1,25 +1,15 @@
-const ApiError = require('../exceptions/api-error.js')
-const tokenService = require('../service/token-service.js')
+const ApiError = require('../exceptions/api-error');
+const tokenService = require('../service/token-service');
 
-module.exports = function (req, res, next) {
-  try {
-    const authorizationHeader = req.headers.authorization;
-    if (!authorizationHeader) {
-      return next(ApiError.UnauthorizedError());
-    }
-    const accessToken = authorizationHeader.split(' ')[1];
-    if (!accessToken) {
-      return next(ApiError.UnauthorizedError());
-    }
-
-    const userData = tokenService.validateAccessToken(accessToken);
-    if (!userData) {
-      return next(ApiError.UnauthorizedError());
-    }
-
-    req.user = userData;
-    next();
-  } catch {
-
-  }
-}
+module.exports = async function authenticate(req, res, next) {
+    try {
+        const header = req.get('Authorization');
+        const match = typeof header === 'string' && /^Bearer ([^ ]+)$/i.exec(header);
+        const claims = match && tokenService.validateAccessToken(match[1]);
+        if (!claims || !await tokenService.findSession(claims.sub, claims.sid)) {
+            return next(ApiError.UnauthorizedError());
+        }
+        req.user = claims;
+        return next();
+    } catch (error) { return next(error); }
+};

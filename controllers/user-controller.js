@@ -1,79 +1,67 @@
 const userService = require('../service/user-service');
-const {validationResult} = require('express-validator');
-const ApiError = require('../exceptions/api-error');
+const config = require('../config');
+
+const cookieOptions = {
+    httpOnly: true, secure: config.production, sameSite: 'strict', path: '/api',
+};
+function clearRefreshCookie(res) {
+    res.clearCookie('refreshToken', cookieOptions);
+}
+function sendSession(res, session) {
+    res.cookie('refreshToken', session.refreshToken, {
+        ...cookieOptions, expires: session.expiresAt,
+    });
+    // The refresh token never crosses into a JavaScript-readable response body.
+    return res.json({ accessToken: session.accessToken, user: session.user });
+}
 
 class UserController {
     async registration(req, res, next) {
         try {
-            const errors = validationResult(req);
-            if(!errors.isEmpty()) {
-                return next(ApiError.BadRequest('Ошибка при регистрации', errors.array()))
-            }
-            const {email, password} = req.body;
-            const userData = await userService.registration(email, password);
-            res.cookie('refreshToken', userData.refreshToken, {maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true});
-            return res.json(userData);
-        } catch (e) {
-            next(e);
-        }
+            const result = await userService.registration(req.body.email, req.body.password);
+            return res.status(202).json(result);
+        } catch (error) { next(error); }
     }
 
     async login(req, res, next) {
         try {
-            const {email, password} = req.body;
-            const userData = await userService.login(email, password);
-            res.cookie('refreshToken', userData.refreshToken, {maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true});
-            return res.json(userData);
-        } catch (e) {
-            next(e);
-        }
+            return sendSession(res, await userService.login(req.body.email, req.body.password));
+        } catch (error) { next(error); }
+    }
+
+    async resendActivation(req, res, next) {
+        try { return res.status(202).json(await userService.resendActivation(req.body.email)); }
+        catch (error) { next(error); }
     }
 
     async logout(req, res, next) {
         try {
-            const {refreshToken} = req.cookies;
-            const token = await userService.logout(refreshToken);
-            res.clearCookie('refreshToken');
-            return res.json(token);
-
-        } catch (e) {
-            next(e);
-        }
-        
+            await userService.logout(req.cookies.refreshToken);
+            clearRefreshCookie(res);
+            return res.status(204).end();
+        } catch (error) { next(error); }
     }
 
     async activate(req, res, next) {
         try {
-            const activationLink = req.params.link;
-            await userService.activate(activationLink);
-            return res.redirect(process.env.CLIENT_URL);
-
-        } catch (e) {
-            next(e);
-        }
+            await userService.activate(req.params.link);
+            return res.redirect(303, config.clientOrigin);
+        } catch (error) { next(error); }
     }
 
     async refresh(req, res, next) {
         try {
-            const { refreshToken } = req.cookies;
-            const userData = await userService.refresh(refreshToken);
-            res.cookie('refreshToken', userData.refreshToken, {maxAge: 30 * 24 * 60 * 60 * 1000, httpOnly: true});
-            return res.json(userData);
-        } catch (e) {
-            next(e);
+            return sendSession(res, await userService.refresh(req.cookies.refreshToken));
+        } catch (error) {
+            if (error.status === 401) clearRefreshCookie(res);
+            next(error);
         }
     }
 
-    async getUsers(req, res, next) {
-        try {
-            const users = await userService.getAllUsers();
-            return res.json(users)
-        } catch (e) {
-            next(e);
-        }
+    async getMe(req, res, next) {
+        try { return res.json(await userService.getMe(req.user.sub)); }
+        catch (error) { next(error); }
     }
-
-
 }
 
 module.exports = new UserController();
